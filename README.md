@@ -37,6 +37,36 @@ and a new installation in the same folder reuses them, unless you confirm their 
 After installation open `http://localhost:<port>` and log in with `admin` / `admin`; Redmine asks to change the
 password. The generated PostgreSQL passwords are in `<folder>\credentials.txt`, which only administrators can read.
 
+## Service management with wsw
+
+The `Redmine` service is run by [wsw](https://github.com/ferama/wsw), a small Windows service wrapper written in Rust
+(single executable, no .NET runtime). wsw starts Puma, captures its output in rotating log files, restarts it if it
+crashes (with backoff) and, on stop or shutdown, sends it Ctrl+C and waits up to the stop timeout before killing the
+whole process tree, so Puma shuts down cleanly.
+
+The executable is `<folder>\service\wsw.exe`. The service configuration lives in the registry, not in a file:
+
+| Setting | Value |
+|---|---|
+| Command | `ruby.exe bundle exec puma` in `<folder>\redmine` |
+| Environment | `RAILS_ENV=production`, Ruby on `PATH` |
+| Account | `NT AUTHORITY\NetworkService`, with write access to `<folder>\redmine` |
+| Start | delayed automatic, after `RedminePostgreSQL` |
+| Stop timeout | 20 s |
+| Restart | always, 10 s delay doubling up to 120 s |
+| Logs | `<folder>\logs`, rotated at 10 MB, 8 files kept |
+
+Useful commands (elevated PowerShell):
+
+```powershell
+C:\Redmine\service\wsw.exe status -n Redmine -v    # state and effective configuration
+C:\Redmine\service\wsw.exe logs -n Redmine -f      # follow the Puma/wsw log
+C:\Redmine\service\wsw.exe restart -n Redmine
+C:\Redmine\service\wsw.exe update -n Redmine --stop-timeout 30   # change a setting, then restart
+```
+
+The regular Windows tools (`services.msc`, `Get-Service`, `Restart-Service`) work as well.
+
 ## Scripts
 
 | Script | Purpose |
