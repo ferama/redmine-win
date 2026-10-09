@@ -23,8 +23,12 @@ function Run([string]$Exe, [string[]]$ArgList) {
     $p = Start-Process $Exe -ArgumentList $ArgList -Wait -PassThru
     [pscustomobject]@{ Code = $p.ExitCode; Sec = [math]::Round($sw.Elapsed.TotalSeconds) }
 }
-function Install { Run $Setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$InstallDir", "/HTTPPORT=$HttpPort",
-                                 "/PGPORT=$PgPort", '/REDMINELANG=en', '/TASKS=firewall', "/LOG=$InstallDir-setup.log") }
+$SetupLog = "$InstallDir-setup.log"
+function Install([string[]]$Extra = @()) {
+    Run $Setup (@('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$InstallDir", "/HTTPPORT=$HttpPort",
+                  "/PGPORT=$PgPort", '/REDMINELANG=en', '/TASKS=firewall', "/LOG=$SetupLog") + $Extra)
+}
+function SetupLogMatch([string]$Pattern) { (Get-Content $SetupLog -Raw -ErrorAction SilentlyContinue) -match $Pattern }
 function Uninstall([string[]]$Extra = @()) { Run (Join-Path $InstallDir 'unins000.exe') (@('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') + $Extra) }
 function Psql([string]$Sql) {
     $c = @{}; Get-Content (Join-Path $InstallDir 'credentials.txt') | Where-Object { $_ -match '^\s*([^=#]+?)\s*=\s*(.*)$' } | ForEach-Object { $c[$Matches[1]] = $Matches[2] }
@@ -42,6 +46,8 @@ Section 'Installazione silenziosa'
 $r = Install
 Check 'setup: exit code 0' ($r.Code -eq 0) "exit=$($r.Code) in $($r.Sec) s"
 Check 'MSYS2 non installato' (-not (Test-Path (Join-Path $InstallDir 'ruby\msys64'))) ''
+Check 'runtime Visual C++ verificato o installato' ((SetupLogMatch 'Runtime Visual C\+\+ x64 gia'' presente') -or (SetupLogMatch 'vc_redist\.x64\.exe terminato con codice (0|1638|3010)\b')) ''
+Check 'vcruntime140.dll disponibile' (Test-Path "$env:SystemRoot\System32\vcruntime140.dll") ''
 Check 'PostgreSQL in ascolto sulla porta scelta' ([bool](Get-NetTCPConnection -State Listen -LocalPort $PgPort -ErrorAction SilentlyContinue)) "porta $PgPort"
 Check 'regola firewall creata' ([bool](Get-NetFirewallRule -DisplayName 'Redmine HTTP' -ErrorAction SilentlyContinue)) ''
 Check 'dati iniziali in inglese' ((Psql "select name from trackers order by position limit 1") -eq 'Bug') (Psql "select string_agg(name, ', ' order by position) from trackers")
@@ -62,9 +68,11 @@ Check 'regola firewall rimossa' (-not (Get-NetFirewallRule -DisplayName 'Redmine
 Check 'programmi rimossi' (-not (Test-Path (Join-Path $InstallDir 'ruby'))) ''
 Check 'dati conservati (pgdata, credenziali)' ((Test-Path (Join-Path $InstallDir 'pgdata\PG_VERSION')) -and (Test-Path (Join-Path $InstallDir 'credentials.txt'))) ''
 
-Section 'Reinstallazione sugli stessi dati'
-$r = Install
+Section 'Reinstallazione sugli stessi dati (con /FORCEVCREDIST)'
+$r = Install @('/FORCEVCREDIST')
 Check 'setup: exit code 0' ($r.Code -eq 0) "exit=$($r.Code) in $($r.Sec) s"
+$vcLine = (Select-String -Path $SetupLog -Pattern 'vc_redist\.x64\.exe terminato con codice \d+' -ErrorAction SilentlyContinue | Select-Object -Last 1).Matches.Value
+Check 'vc_redist incluso eseguito con successo' ($vcLine -match 'codice (0|1638|3010)$') "$vcLine"
 Check 'database riutilizzato' ((Psql 'select id from install_marker') -eq '42') ''
 Check 'Redmine risponde' ($(try { (Invoke-WebRequest "http://localhost:$HttpPort/login" -UseBasicParsing -TimeoutSec 10).StatusCode -eq 200 } catch { $false })) ''
 

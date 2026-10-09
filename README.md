@@ -17,6 +17,10 @@ Download `Redmine-<version>-Setup.exe` from the [releases](https://github.com/fe
 (or from the artifacts of the latest pipeline run). It contains everything, with the native gems already compiled,
 and installs without an Internet connection.
 
+The only system-wide component is the Microsoft Visual C++ x64 runtime (`vcruntime140.dll`), which PostgreSQL needs and
+Windows does not ship. The official `vc_redist.x64.exe` is bundled in the installer and runs silently only when the
+runtime is missing or older than the bundled one, so Windows Update keeps patching it afterwards.
+
 The wizard asks for:
 - the installation folder (no spaces, max 60 characters);
 - the Redmine HTTP port and the PostgreSQL port (it checks they are free);

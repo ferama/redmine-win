@@ -4,6 +4,8 @@
 ; Installazione silenziosa:
 ;   Redmine-<versione>-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /DIR=D:\Redmine
 ;       /HTTPPORT=8080 /PGPORT=5433 /REDMINELANG=en /TASKS=firewall /LOG=setup.log
+; Il runtime Visual C++ incluso viene installato solo se manca o e' piu' vecchio
+; (/FORCEVCREDIST lo esegue comunque, per i test)
 ; Disinstallazione silenziosa (i dati restano, salvo /REMOVEDATA):
 ;   unins000.exe /VERYSILENT /SUPPRESSMSGBOXES [/REMOVEDATA]
 
@@ -12,6 +14,15 @@
 #endif
 #ifndef StageDir
   #define StageDir "stage"
+#endif
+; Runtime Visual C++ x64 richiesto da PostgreSQL (vcruntime140.dll): versione passata da Build-Installer.ps1
+#ifndef VcRedist
+  #define VcRedist "cache\vc_redist.x64.exe"
+#endif
+#ifndef VcRedistVersion
+  #define VcRedistVersion "14.51.36247.0"
+  #define VcRedistMinor "51"
+  #define VcRedistBld "36247"
 #endif
 
 [Setup]
@@ -66,6 +77,8 @@ it.ErrPortSame=La porta HTTP e quella di PostgreSQL devono essere diverse.
 it.ErrPortBusy=La porta %1 e' gia' in uso da un altro programma. Sceglierne un'altra.
 it.Configuring=Configurazione di PostgreSQL e Redmine in corso (qualche minuto)...
 it.ConfigFailed=La configurazione di Redmine non e' riuscita (codice %1).%n%nDettagli nel log:%n%2%n%nDopo aver risolto il problema si puo' rilanciare l'installazione.
+it.VcRedistInstalling=Installazione del runtime Microsoft Visual C++ (richiesto da PostgreSQL)...
+it.VcRedistFailed=L'installazione del runtime Microsoft Visual C++ non e' riuscita (codice %1). Installare vc_redist.x64.exe da https://aka.ms/vc14/vc_redist.x64.exe e ripetere l'installazione.
 it.OpenRedmine=Apri Redmine nel browser
 it.RemoveData=Eliminare anche database, allegati, credenziali e log?%n%nScegliendo No restano in %1 e verranno riutilizzati da una nuova installazione.
 it.DataKept=I dati di Redmine sono stati conservati in %1.
@@ -84,6 +97,8 @@ en.ErrPortSame=The HTTP and PostgreSQL ports must be different.
 en.ErrPortBusy=Port %1 is already used by another program. Please choose another one.
 en.Configuring=Configuring PostgreSQL and Redmine (this takes a few minutes)...
 en.ConfigFailed=The Redmine configuration failed (code %1).%n%nDetails in the log:%n%2%n%nOnce the problem is fixed the setup can be run again.
+en.VcRedistInstalling=Installing the Microsoft Visual C++ runtime (required by PostgreSQL)...
+en.VcRedistFailed=The Microsoft Visual C++ runtime installation failed (code %1). Install vc_redist.x64.exe from https://aka.ms/vc14/vc_redist.x64.exe and run the setup again.
 en.OpenRedmine=Open Redmine in the browser
 en.RemoveData=Also delete the database, attachments, credentials and logs?%n%nIf you choose No they stay in %1 and are reused by a new installation.
 en.DataKept=The Redmine data has been kept in %1.
@@ -92,6 +107,7 @@ en.DataKept=The Redmine data has been kept in %1.
 Name: "firewall"; Description: "{cm:FirewallTask}"; Flags: unchecked
 
 [Files]
+Source: "{#VcRedist}"; DestName: "vc_redist.x64.exe"; Flags: dontcopy
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [INI]
@@ -139,6 +155,56 @@ begin
               '', SW_HIDE, ewWaitUntilTerminated, Code) then
     Code := -1;
   Result := Code;
+end;
+
+function HasParam(const Name: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Name) = 0 then
+      Result := True;
+end;
+
+{ --- Runtime Visual C++ (vcruntime140.dll, usata da postgres.exe e libpq.dll) --- }
+
+const
+  VcRuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
+
+{ True se e' installato un runtime x64 almeno pari a quello incluso nell'installer }
+function VcRuntimeCurrent: Boolean;
+var
+  Installed, Minor, Bld: Cardinal;
+begin
+  Result := RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Installed', Installed) and (Installed = 1) and
+            RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Minor', Minor) and
+            RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Bld', Bld) and
+            ((Minor > {#VcRedistMinor}) or ((Minor = {#VcRedistMinor}) and (Bld >= {#VcRedistBld}))) and
+            FileExists(ExpandConstant('{sys}\vcruntime140.dll'));
+end;
+
+{ Stringa vuota se il runtime e' a posto, altrimenti il messaggio d'errore }
+function EnsureVcRuntime: String;
+var
+  Code: Integer;
+begin
+  Result := '';
+  if VcRuntimeCurrent and not HasParam('/FORCEVCREDIST') then begin
+    Log('Runtime Visual C++ x64 gia'' presente e aggiornato (incluso: {#VcRedistVersion})');
+    Exit;
+  end;
+  Log('Installazione del runtime Visual C++ x64 {#VcRedistVersion}');
+  WizardForm.PreparingLabel.Caption := CustomMessage('VcRedistInstalling');
+  WizardForm.PreparingLabel.Visible := True;
+  ExtractTemporaryFile('vc_redist.x64.exe');
+  if not Exec(ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart', '',
+              SW_HIDE, ewWaitUntilTerminated, Code) then
+    Code := -1;
+  Log('vc_redist.x64.exe terminato con codice ' + IntToStr(Code));
+  { 1638: e' gia' installata una versione piu' recente; 3010: riavvio consigliato, il runtime e' gia' utilizzabile }
+  if (Code <> 0) and (Code <> 1638) and (Code <> 3010) then
+    Result := FmtMessage(CustomMessage('VcRedistFailed'), [IntToStr(Code)]);
 end;
 
 { --- Valori scelti (pagine, riga di comando o installazione precedente) --- }
@@ -286,6 +352,10 @@ begin
   Result := CheckPorts;
   if Result <> '' then
     Exit;
+  { Prima di copiare qualsiasi file: se il runtime non si installa, il setup si ferma pulito }
+  Result := EnsureVcRuntime;
+  if Result <> '' then
+    Exit;
   { Aggiornamento/reinstallazione: i servizi tengono aperti i file da sostituire }
   if ServiceInstalled(RedmineService) or ServiceInstalled(PgService) then
     RunPowerShell('Stop-Service ' + RedmineService + ',' + PgService + ' -Force -ErrorAction SilentlyContinue');
@@ -333,16 +403,6 @@ begin
 end;
 
 { --- Disinstallazione --- }
-
-function HasParam(const Name: String): Boolean;
-var
-  I: Integer;
-begin
-  Result := False;
-  for I := 1 to ParamCount do
-    if CompareText(ParamStr(I), Name) = 0 then
-      Result := True;
-end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var

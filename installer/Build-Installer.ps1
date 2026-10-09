@@ -19,7 +19,10 @@ param(
     # Riusa l'installazione di build esistente in BuildDir (rifa' solo stage e compilazione)
     [switch]$ReuseBuild,
     # Scaricato in installer\tools\InnoSetup (installazione portable, per utente) se manca
-    [string]$InnoSetupVersion = '7.1.0'
+    [string]$InnoSetupVersion = '7.1.0',
+    # Runtime Visual C++ 2015-2022+ x64 (richiesto da PostgreSQL), incluso nell'installer.
+    # Viene riscaricato a ogni build per includere sempre l'ultima versione con le correzioni di sicurezza
+    [string]$VcRedistUrl = 'https://aka.ms/vs/18/release/vc_redist.x64.exe'
 )
 $ErrorActionPreference = 'Stop'
 $InstallerDir = $PSScriptRoot
@@ -122,11 +125,24 @@ if (-not $KeepBuildDir) {
     Remove-Item $BuildDir -Recurse -Force
 }
 
-# --- 3. Compilazione -------------------------------------------------------
+# --- 3. Runtime Visual C++ -------------------------------------------------
+Write-Step 'Runtime Visual C++ x64'
+$vcRedist = Join-Path $InstallerDir 'cache\vc_redist.x64.exe'
+Invoke-WebRequest $VcRedistUrl -OutFile "$vcRedist.part" -UseBasicParsing
+$sig = Get-AuthenticodeSignature "$vcRedist.part"
+if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '^CN=Microsoft Corporation,') {
+    throw "vc_redist.x64.exe: firma non valida ($($sig.Status), $($sig.SignerCertificate.Subject))"
+}
+Move-Item "$vcRedist.part" $vcRedist -Force
+$vcVersion = [version](Get-Item $vcRedist).VersionInfo.FileVersion
+Write-Host "    vc_redist.x64.exe $vcVersion"
+
+# --- 4. Compilazione -------------------------------------------------------
 Write-Step "Compilazione installer Redmine $AppVersion"
 Push-Location $InstallerDir
 try {
-    & $Iscc /Qp "/DAppVersion=$AppVersion" "/DStageDir=$Stage" 'redmine-setup.iss'
+    & $Iscc /Qp "/DAppVersion=$AppVersion" "/DStageDir=$Stage" "/DVcRedist=$vcRedist" `
+        "/DVcRedistVersion=$vcVersion" "/DVcRedistMinor=$($vcVersion.Minor)" "/DVcRedistBld=$($vcVersion.Build)" 'redmine-setup.iss'
     if ($LASTEXITCODE -ne 0) { throw "ISCC fallito (exit $LASTEXITCODE)" }
 } finally {
     Pop-Location
