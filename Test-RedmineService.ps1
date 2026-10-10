@@ -27,6 +27,19 @@ function WaitFor([scriptblock]$Condition, [int]$TimeoutSec = 30) {
     return $false
 }
 function LoginOk { try { (Invoke-WebRequest "http://localhost:$HttpPort/login" -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch { $false } }
+# Login vero con le credenziali iniziali: Redmine risponde con un redirect e poi chiede il cambio password.
+# Con credenziali errate la risposta e' 200 con il form di login di nuovo.
+function Test-AdminLogin {
+    try {
+        $base = "http://localhost:$HttpPort"
+        $page = Invoke-WebRequest "$base/login" -SessionVariable session -UseBasicParsing
+        $token = ([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"')).Groups[1].Value
+        $post = Invoke-WebRequest "$base/login" -Method Post -WebSession $session -UseBasicParsing `
+            -Body @{ authenticity_token = $token; username = 'admin'; password = 'admin' }
+        # Dopo i redirect si arriva alla pagina di cambio password, che contiene il campo new_password
+        return $post.Content -match 'name="new_password"'
+    } catch { return $false }
+}
 function Puma { Get-CimInstance Win32_Process -Filter "Name='ruby.exe'" | Where-Object { $_.CommandLine -match 'puma' } | Select-Object -First 1 }
 function Unexpected([datetime]$Since) {
     @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager'; Id = 7031, 7034; StartTime = $Since } -ErrorAction SilentlyContinue |
@@ -53,6 +66,7 @@ $p = Puma
 $owner = if ($p) { $o = Invoke-CimMethod -InputObject $p -MethodName GetOwner; "$($o.Domain)\$($o.User)" } else { '' }
 Check 'Puma gira come NetworkService' ($owner -match 'NETWORK SERVICE|SERVIZIO DI RETE|NetworkService') "pid=$($p.ProcessId) owner=$owner"
 $css = ([regex]::Match((Invoke-WebRequest "http://localhost:$HttpPort/login" -UseBasicParsing).Content, 'href="(/assets/[^"]+\.css)"')).Groups[1].Value
+Check 'login admin/admin riuscito (prima installazione)' (Test-AdminLogin) 'POST /login -> redirect, poi cambio password obbligatorio'
 Check 'asset statici serviti' ($css -and (Invoke-WebRequest "http://localhost:$HttpPort$css" -UseBasicParsing).StatusCode -eq 200) $css
 
 Section 'Stop ordinato'

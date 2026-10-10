@@ -287,6 +287,29 @@ try {
     Invoke-Native $RubyExe $BundleRb exec rake db:migrate
     Write-Host "    dati di default ($Language)"
     Invoke-Native $RubyExe $BundleRb exec rake redmine:load_default_data
+
+    # Redmine 7.0.x: la migrazione 001_setup crea l'admin con mail_notification = true, che il modello
+    # attuale rifiuta; usando save (non save!) l'utente non viene creato e nessuno se ne accorge.
+    # Se non esiste alcun amministratore lo creiamo noi: admin/admin con cambio password al primo accesso.
+    $ensureAdmin = Join-Path $env:TEMP "redmine-ensure-admin-$([guid]::NewGuid()).rb"
+    Write-TextFile $ensureAdmin @'
+if User.where(admin: true).exists?
+  puts "    amministratore presente: #{User.where(admin: true).pluck(:login).join(', ')}"
+else
+  user = User.new(firstname: 'Redmine', lastname: 'Admin', mail: 'admin@example.net')
+  user.login = 'admin'
+  user.admin = true
+  user.salt_password('admin')
+  user.must_change_passwd = true
+  user.save!
+  puts "    creato l'utente admin (password admin, da cambiare al primo accesso)"
+end
+'@
+    try {
+        Invoke-Native $RubyExe $BundleRb exec rails runner $ensureAdmin
+    } finally {
+        Remove-Item $ensureAdmin -Force -ErrorAction SilentlyContinue
+    }
     Write-Host "    precompilazione asset"
     Invoke-Native $RubyExe $BundleRb exec rake assets:precompile
 } finally {
