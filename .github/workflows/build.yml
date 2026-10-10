@@ -80,8 +80,13 @@ jobs:
           name: redmine-setup
           path: dist
 
-      - name: Create GitHub Release
+      # Re-pushing a tag (git push --force origin <tag>) updates the existing release and
+      # replaces its files, so a release can be rebuilt without deleting it by hand
+      - name: Create or update GitHub Release
         uses: ncipollo/release-action@v1
         with:
           artifacts: dist/*
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
           token: ${{ secrets.GITHUB_TOKEN }}
