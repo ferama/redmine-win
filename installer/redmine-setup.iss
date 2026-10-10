@@ -79,6 +79,8 @@ it.Configuring=Configurazione di PostgreSQL e Redmine in corso (qualche minuto).
 it.ConfigFailed=La configurazione di Redmine non e' riuscita (codice %1).%n%nDettagli nel log:%n%2%n%nDopo aver risolto il problema si puo' rilanciare l'installazione.
 it.VcRedistInstalling=Installazione del runtime Microsoft Visual C++ (richiesto da PostgreSQL)...
 it.VcRedistFailed=L'installazione del runtime Microsoft Visual C++ non e' riuscita (codice %1). Installare vc_redist.x64.exe da https://aka.ms/vc14/vc_redist.x64.exe e ripetere l'installazione.
+it.FinishedOk=Redmine e' installato e in esecuzione all'indirizzo:%n%1%n%nAccesso iniziale:%n    utente:  admin%n    password:  admin%nAl primo accesso Redmine chiede di cambiare la password.%n%nLe password generate per PostgreSQL sono nel file (leggibile solo dagli amministratori):%n%2
+it.FinishedFailed=I file di Redmine sono stati installati, ma la configurazione non e' riuscita.%n%nDettagli nel log:%n%1
 it.OpenRedmine=Apri Redmine nel browser
 it.RemoveData=Eliminare anche database, allegati, credenziali e log?%n%nScegliendo No restano in %1 e verranno riutilizzati da una nuova installazione.
 it.DataKept=I dati di Redmine sono stati conservati in %1.
@@ -99,6 +101,8 @@ en.Configuring=Configuring PostgreSQL and Redmine (this takes a few minutes)...
 en.ConfigFailed=The Redmine configuration failed (code %1).%n%nDetails in the log:%n%2%n%nOnce the problem is fixed the setup can be run again.
 en.VcRedistInstalling=Installing the Microsoft Visual C++ runtime (required by PostgreSQL)...
 en.VcRedistFailed=The Microsoft Visual C++ runtime installation failed (code %1). Install vc_redist.x64.exe from https://aka.ms/vc14/vc_redist.x64.exe and run the setup again.
+en.FinishedOk=Redmine is installed and running at:%n%1%n%nInitial login:%n    user:  admin%n    password:  admin%nRedmine asks to change the password at the first login.%n%nThe generated PostgreSQL passwords are in this file (readable by administrators only):%n%2
+en.FinishedFailed=The Redmine files have been installed, but the configuration failed.%n%nDetails in the log:%n%1
 en.OpenRedmine=Open Redmine in the browser
 en.RemoveData=Also delete the database, attachments, credentials and logs?%n%nIf you choose No they stay in %1 and are reused by a new installation.
 en.DataKept=The Redmine data has been kept in %1.
@@ -391,6 +395,23 @@ begin
   if ConfigExitCode <> 0 then
     SuppressibleMsgBox(FmtMessage(CustomMessage('ConfigFailed'), [IntToStr(ConfigExitCode), LogFile]),
       mbCriticalError, MB_OK, IDOK);
+end;
+
+{ Pagina finale: indirizzo, credenziali iniziali e posizione delle password di PostgreSQL }
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID <> wpFinished then
+    Exit;
+  { Nota: in [Code] una riga non deve iniziare con '[', Inno la leggerebbe come intestazione di sezione }
+  if ConfigExitCode = 0 then
+    WizardForm.FinishedLabel.Caption := FmtMessage(CustomMessage('FinishedOk'), [
+      'http://localhost:' + GetHttpPort(''), ExpandConstant('{app}\credentials.txt')])
+  else
+    WizardForm.FinishedLabel.Caption := FmtMessage(CustomMessage('FinishedFailed'), [
+      ExpandConstant('{app}\logs\setup.log')]);
+  WizardForm.FinishedLabel.AdjustHeight;
+  { La casella "Apri Redmine" segue il testo, che ora e' piu' lungo }
+  WizardForm.RunList.Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(12);
 end;
 
 { Exit code del setup: 0 solo se anche la configurazione e' riuscita (utile per /VERYSILENT) }
