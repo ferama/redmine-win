@@ -1,43 +1,44 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Installa Redmine + PostgreSQL in modalita' "portable" (tutto sotto una cartella) e li registra come servizi Windows.
+    Installa Redmine + MariaDB in modalita' "portable" (tutto sotto una cartella) e li registra come servizi Windows.
 
 .DESCRIPTION
     Struttura risultante (default C:\Redmine):
-        downloads\   archivi scaricati (cache, riusati se si rilancia lo script)
-        pgsql\       binari PostgreSQL (zip EDB)       -> servizio "RedminePostgreSQL" (pg_ctl register)
-        pgdata\      cluster PostgreSQL
-        ruby\        Ruby (RubyInstaller 7z) + msys64\ (DevKit MSYS2 portable, per compilare le gem native)
-        redmine\     applicazione Redmine, servita da Puma -> servizio "Redmine" (wsw)
-        service\     wsw.exe (service wrapper; configurazione nel registro, vedi "wsw status -v -n Redmine")
-        logs\        log del servizio Redmine (output di Puma + eventi di wsw)
+        downloads\     archivi scaricati (cache, riusati se si rilancia lo script)
+        mariadb\       binari MariaDB (zip ufficiale)    -> servizio "RedmineMariaDB" (mariadb-install-db)
+        mariadb-data\  dati e my.ini di MariaDB
+        ruby\          Ruby (RubyInstaller 7z) + msys64\ (DevKit MSYS2 portable, per compilare le gem native)
+        redmine\       applicazione Redmine, servita da Puma -> servizio "Redmine" (wsw)
+        service\       wsw.exe (service wrapper; configurazione nel registro, vedi "wsw status -v -n Redmine")
+        logs\          log del servizio Redmine (output di Puma + eventi di wsw)
         credentials.txt  password generate (leggibile solo dagli Administrators)
 
-    Entrambi i servizi girano come NT AUTHORITY\NetworkService.
+    Entrambi i servizi girano come NT AUTHORITY\NetworkService. MariaDB ascolta solo su 127.0.0.1.
+    Nota: Redmine 7.0 dichiara il supporto per MySQL 8.0-8.4; MariaDB e' compatibile via adapter mysql2
+    ma non e' tra i database testati ufficialmente.
     Lo script e' rilanciabile: gli step gia' completati vengono saltati.
 
 .EXAMPLE
     .\Install-Redmine.ps1
-    .\Install-Redmine.ps1 -InstallDir D:\Redmine -HttpPort 8080 -OpenFirewall
+    .\Install-Redmine.ps1 -InstallDir D:\Redmine -HttpPort 8080 -DbPort 3307 -OpenFirewall
 #>
 [CmdletBinding()]
 param(
     [string]$InstallDir      = 'C:\Redmine',
     [string]$RedmineVersion  = '7.0.2',
     # Redmine 7.0 supporta Ruby 3.2-4.0; 3.4 ha la miglior copertura di gem native precompilate per Windows
-
     [string]$RubyVersion     = '3.4.11-1',
-    [string]$PostgresVersion = '17.11',
-    # EDB pubblica gli zip tramite fileid: aggiornare insieme a PostgresVersion
-    # (https://www.enterprisedb.com/download-postgresql-binaries)
-    [string]$PostgresZipUrl  = 'https://sbp.enterprisedb.com/getfile.jsp?fileid=1260616',
+    # MariaDB LTS (https://mariadb.org/download): aggiornare versione e SHA256 insieme
+    [string]$MariaDBVersion  = '11.8.9',
+    [string]$MariaDBSha256   = '830c46727d9278eae212ae3eca44eeb9e71b2a68704e95f344a64fba7b1963f5',
+    [string]$MariaDBZipUrl   = "https://downloads.mariadb.org/rest-api/mariadb/$MariaDBVersion/mariadb-$MariaDBVersion-winx64.zip",
     # Tag della release di https://github.com/ferama/wsw (service wrapper)
     [string]$WswVersion      = '0.10.0',
-    [int]$PgPort             = 5432,
+    [int]$DbPort             = 3306,
     [int]$HttpPort           = 3000,
     [string]$Language        = 'it',
-    [string]$PgServiceName      = 'RedminePostgreSQL',
+    [string]$DbServiceName      = 'RedmineMariaDB',
     [string]$RedmineServiceName = 'Redmine',
     [switch]$OpenFirewall,
     # Componenti gia' presenti in InstallDir (installer precompilato): niente download, MSYS2 ne' compilazione
@@ -52,8 +53,8 @@ $ProgressPreference    = 'SilentlyContinue'   # Invoke-WebRequest molto piu' vel
 
 # --- Percorsi --------------------------------------------------------------
 $DownloadDir = Join-Path $InstallDir 'downloads'
-$PgDir       = Join-Path $InstallDir 'pgsql'
-$PgData      = Join-Path $InstallDir 'pgdata'
+$DbDir       = Join-Path $InstallDir 'mariadb'
+$DbData      = Join-Path $InstallDir 'mariadb-data'
 $RubyDir     = Join-Path $InstallDir 'ruby'
 $RedmineDir  = Join-Path $InstallDir 'redmine'
 $ServiceDir  = Join-Path $InstallDir 'service'
@@ -63,7 +64,8 @@ $ServiceUser = 'NT AUTHORITY\NetworkService'
 
 $RubyExe   = Join-Path $RubyDir 'bin\ruby.exe'
 $BundleRb  = Join-Path $RubyDir 'bin\bundle'
-$Psql      = Join-Path $PgDir 'bin\psql.exe'
+$MariaDb   = Join-Path $DbDir 'bin\mariadb.exe'
+$MyIni     = Join-Path $DbData 'my.ini'
 
 # --- Helper ----------------------------------------------------------------
 function Write-Step([string]$Message) {
@@ -114,7 +116,7 @@ function New-RandomPassword([int]$Length = 24) {
 
 function Write-TextFile([string]$Path, [string]$Text) {
     # UTF-8 senza BOM: in Windows PowerShell 5.1 Set-Content -Encoding UTF8 aggiunge il BOM,
-    # che Ruby/YAML non accettano in Gemfile.local e database.yml
+    # che Ruby/YAML e MariaDB non accettano in Gemfile.local, database.yml e my.ini
     [IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding $false))
 }
 
@@ -131,6 +133,47 @@ function Read-Credentials {
     return $creds
 }
 
+function Invoke-MariaDbRoot([string]$Sql) {
+    # Password via MYSQL_PWD: non compare nella riga di comando del processo
+    $env:MYSQL_PWD = $creds['DB_ROOT_PASSWORD']
+    try {
+        Invoke-Native $MariaDb --protocol=TCP -h 127.0.0.1 -P $DbPort -u root --batch -e $Sql
+    } finally {
+        Remove-Item Env:MYSQL_PWD -ErrorAction SilentlyContinue
+    }
+}
+
+function Copy-NativeGemDlls {
+    # Le gem native compilate con MSYS2 (es. mysql2 -> libmariadb.dll) dipendono da DLL di msys64\ucrt64\bin.
+    # Le copiamo in ruby\bin (cartella dell'eseguibile, sempre nel percorso di ricerca delle DLL)
+    # cosi' Ruby funziona anche senza MSYS2, come nell'installer offline.
+    $ucrtBin = Join-Path $MsysDir 'ucrt64\bin'
+    $objdump = Join-Path $ucrtBin 'objdump.exe'
+    $target  = Join-Path $RubyDir 'bin'
+    $present = @{}
+    Get-ChildItem $target, (Join-Path $target 'ruby_builtin_dlls') -Filter *.dll -ErrorAction SilentlyContinue |
+        ForEach-Object { $present[$_.Name.ToLower()] = $true }
+    $queue = New-Object System.Collections.Generic.Queue[string]
+    Get-ChildItem (Join-Path $RubyDir 'lib\ruby\gems') -Recurse -Filter *.so | ForEach-Object { $queue.Enqueue($_.FullName) }
+    $seen = @{}
+    while ($queue.Count -gt 0) {
+        $file = $queue.Dequeue()
+        $deps = & $objdump -p $file | Select-String 'DLL Name:\s*(\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+        foreach ($dll in $deps) {
+            $key = $dll.ToLower()
+            if ($seen[$key] -or $present[$key]) { continue }
+            $seen[$key] = $true
+            $source = Join-Path $ucrtBin $dll
+            if (Test-Path $source) {
+                Copy-Item $source $target
+                $present[$key] = $true
+                Write-Host "    + $dll"
+                $queue.Enqueue($source)
+            }
+        }
+    }
+}
+
 if ($LogFile) {
     New-Item -ItemType Directory -Force (Split-Path $LogFile) | Out-Null
     Start-Transcript -Path $LogFile -Append | Out-Null
@@ -142,76 +185,91 @@ Write-Step "Cartella di installazione: $InstallDir$(if ($Offline) { ' (offline)'
 New-Item -ItemType Directory -Force $InstallDir, $DownloadDir, $ServiceDir, $LogDir | Out-Null
 
 $creds = Read-Credentials
-if (-not $creds['PG_SUPERUSER_PASSWORD']) { $creds['PG_SUPERUSER_PASSWORD'] = New-RandomPassword }
-if (-not $creds['PG_REDMINE_PASSWORD'])   { $creds['PG_REDMINE_PASSWORD']   = New-RandomPassword }
+if (-not $creds['DB_ROOT_PASSWORD'])    { $creds['DB_ROOT_PASSWORD']    = New-RandomPassword }
+if (-not $creds['DB_REDMINE_PASSWORD']) { $creds['DB_REDMINE_PASSWORD'] = New-RandomPassword }
 @(
     "# Credenziali generate da Install-Redmine.ps1 il $(Get-Date -Format s)"
-    "PG_SUPERUSER = postgres"
-    "PG_SUPERUSER_PASSWORD = $($creds['PG_SUPERUSER_PASSWORD'])"
-    "PG_REDMINE_USER = redmine"
-    "PG_REDMINE_PASSWORD = $($creds['PG_REDMINE_PASSWORD'])"
-    "PG_PORT = $PgPort"
+    "DB_ENGINE = MariaDB $MariaDBVersion"
+    "DB_ROOT_USER = root"
+    "DB_ROOT_PASSWORD = $($creds['DB_ROOT_PASSWORD'])"
+    "DB_REDMINE_USER = redmine"
+    "DB_REDMINE_PASSWORD = $($creds['DB_REDMINE_PASSWORD'])"
+    "DB_PORT = $DbPort"
     "REDMINE_URL = http://localhost:$HttpPort"
     "REDMINE_FIRST_LOGIN = admin / admin (cambio password obbligatorio al primo accesso)"
 ) | Set-Content -Path $CredFile -Encoding UTF8
 # Accesso al file riservato ad Administrators e SYSTEM
 Invoke-Native icacls.exe $CredFile /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null
 
-# --- 1. PostgreSQL ---------------------------------------------------------
-Write-Step "PostgreSQL $PostgresVersion"
-if (-not (Test-Path (Join-Path $PgDir 'bin\postgres.exe'))) {
-    $zip = Get-Download $PostgresZipUrl "postgresql-$PostgresVersion-windows-x64-binaries.zip"
-    Expand-ArchiveTo $zip $InstallDir      # lo zip contiene la cartella "pgsql"
+# --- 1. MariaDB ------------------------------------------------------------
+Write-Step "MariaDB $MariaDBVersion"
+if (-not (Test-Path (Join-Path $DbDir 'bin\mariadbd.exe'))) {
+    $zip = Get-Download $MariaDBZipUrl "mariadb-$MariaDBVersion-winx64.zip"
+    if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $MariaDBSha256) {
+        Remove-Item $zip -Force
+        throw "SHA256 di mariadb-$MariaDBVersion-winx64.zip non corrispondente: archivio rimosso, rilanciare lo script"
+    }
+    Expand-ArchiveTo $zip $InstallDir      # lo zip contiene la cartella "mariadb-<versione>-winx64"
+    Rename-Item (Join-Path $InstallDir "mariadb-$MariaDBVersion-winx64") $DbDir
 }
 
-if (-not (Test-Path (Join-Path $PgData 'PG_VERSION'))) {
-    Write-Host "    initdb in $PgData"
-    $pwFile = Join-Path $env:TEMP "pgpw-$([guid]::NewGuid()).txt"
-    try {
-        Set-Content -Path $pwFile -Value $creds['PG_SUPERUSER_PASSWORD'] -NoNewline -Encoding ASCII
-        Invoke-Native (Join-Path $PgDir 'bin\initdb.exe') -D $PgData -U postgres "--pwfile=$pwFile" `
-            -A scram-sha-256 -E UTF8 --locale=C
-    } finally {
-        Remove-Item $pwFile -Force -ErrorAction SilentlyContinue
+if (-not (Test-Path $MyIni)) {
+    Write-Host "    mariadb-install-db in $DbData (servizio $DbServiceName)"
+    if (Get-Service $DbServiceName -ErrorAction SilentlyContinue) {
+        throw "Il servizio $DbServiceName esiste gia' ma $DbData no: rimuoverlo (sc.exe delete $DbServiceName) e rilanciare"
     }
-    Add-Content -Path (Join-Path $PgData 'postgresql.conf') -Value @(
+    Invoke-Native (Join-Path $DbDir 'bin\mariadb-install-db.exe') "--datadir=$DbData" "--service=$DbServiceName" `
+        "--port=$DbPort" "--password=$($creds['DB_ROOT_PASSWORD'])" --silent
+    Add-Content -Path $MyIni -Encoding ASCII -Value @(
         ''
         '# --- Install-Redmine.ps1 ---'
-        "port = $PgPort"
-        "listen_addresses = 'localhost'"
+        '[mysqld]'
+        'bind-address=127.0.0.1'
+        'character-set-server=utf8mb4'
+        'collation-server=utf8mb4_unicode_ci'
+        'transaction-isolation=READ-COMMITTED'
     )
+} elseif (-not (Get-Service $DbServiceName -ErrorAction SilentlyContinue)) {
+    # Dati conservati da una disinstallazione precedente: si registra solo il servizio
+    Write-Host "    registrazione servizio $DbServiceName sui dati esistenti"
+    Invoke-Native (Join-Path $DbDir 'bin\mariadbd.exe') --install $DbServiceName "--defaults-file=$MyIni"
 }
-Grant-Modify $PgData $ServiceUser
+# La porta segue sempre il parametro, anche quando i dati esistono gia'
+$ini = [IO.File]::ReadAllText($MyIni)
+$ini = [regex]::Replace($ini, '(?m)^\s*port\s*=\s*\d+\s*$', "port=$DbPort")
+Write-TextFile $MyIni $ini
 
-if (-not (Get-Service $PgServiceName -ErrorAction SilentlyContinue)) {
-    Write-Host "    registrazione servizio $PgServiceName"
-    Invoke-Native (Join-Path $PgDir 'bin\pg_ctl.exe') register -N $PgServiceName -U $ServiceUser `
-        -D $PgData -S auto -w
-}
-Start-Service $PgServiceName
+Grant-Modify $DbData $ServiceUser
+Invoke-Native sc.exe config $DbServiceName obj= $ServiceUser password= '""' start= auto | Out-Null
+Restart-Service $DbServiceName -Force -ErrorAction SilentlyContinue
+Start-Service $DbServiceName
 
-$env:PGPASSWORD = $creds['PG_SUPERUSER_PASSWORD']
+$env:MYSQL_PWD = $creds['DB_ROOT_PASSWORD']
 $ready = $false
-for ($i = 0; $i -lt 30 -and -not $ready; $i++) {
-    & (Join-Path $PgDir 'bin\pg_isready.exe') -h localhost -p $PgPort -q
+# In Windows PowerShell 5.1 lo stderr rediretto di un comando esterno diventa un errore che, con
+# ErrorActionPreference = Stop, interromperebbe lo script mentre il server sta ancora partendo
+$ErrorActionPreference = 'Continue'
+for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
+    & (Join-Path $DbDir 'bin\mariadb-admin.exe') --protocol=TCP -h 127.0.0.1 -P $DbPort -u root --silent ping 2>$null | Out-Null
     $ready = ($LASTEXITCODE -eq 0)
     if (-not $ready) { Start-Sleep -Seconds 1 }
 }
-if (-not $ready) { throw "PostgreSQL non risponde sulla porta $PgPort" }
+$ErrorActionPreference = 'Stop'
+Remove-Item Env:MYSQL_PWD -ErrorAction SilentlyContinue
+if (-not $ready) { throw "MariaDB non risponde sulla porta $DbPort" }
 
-Write-Host "    creazione ruolo e database 'redmine'"
-$pgArgs = @('-h', 'localhost', '-p', $PgPort, '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-tAq')
-$roleExists = (& $Psql @pgArgs -c "SELECT 1 FROM pg_roles WHERE rolname='redmine'") -eq '1'
-if ($roleExists) {
-    Invoke-Native $Psql @pgArgs -c "ALTER ROLE redmine WITH LOGIN PASSWORD '$($creds['PG_REDMINE_PASSWORD'])'"
-} else {
-    Invoke-Native $Psql @pgArgs -c "CREATE ROLE redmine LOGIN PASSWORD '$($creds['PG_REDMINE_PASSWORD'])' NOINHERIT VALID UNTIL 'infinity'"
-}
-$dbExists = (& $Psql @pgArgs -c "SELECT 1 FROM pg_database WHERE datname='redmine'") -eq '1'
-if (-not $dbExists) {
-    Invoke-Native $Psql @pgArgs -c "CREATE DATABASE redmine WITH ENCODING='UTF8' OWNER=redmine TEMPLATE=template0"
-}
-Remove-Item Env:PGPASSWORD
+Write-Host "    creazione utente e database 'redmine'"
+$pw = $creds['DB_REDMINE_PASSWORD']
+Invoke-MariaDbRoot (@(
+    "CREATE DATABASE IF NOT EXISTS redmine CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    # TCP da 127.0.0.1 puo' risultare come host 'localhost' o '127.0.0.1': l'utente esiste per entrambi
+    foreach ($h in 'localhost', '127.0.0.1') {
+        "CREATE USER IF NOT EXISTS 'redmine'@'$h' IDENTIFIED BY '$pw';"
+        "ALTER USER 'redmine'@'$h' IDENTIFIED BY '$pw';"
+        "GRANT ALL PRIVILEGES ON redmine.* TO 'redmine'@'$h';"
+    }
+    "FLUSH PRIVILEGES;"
+) -join ' ')
 
 # --- 2. Ruby + DevKit (MSYS2) portable -------------------------------------
 Write-Step "Ruby $RubyVersion"
@@ -233,12 +291,16 @@ if ($Offline) {
     # Primo avvio: inizializza keyring pacman
     Invoke-Native (Join-Path $MsysDir 'usr\bin\bash.exe') -lc 'true'
 }
-if (-not $Offline -and -not (Test-Path (Join-Path $MsysDir 'ucrt64\bin\gcc.exe'))) {
-    Write-Host "    ridk install 3 (toolchain MinGW UCRT64)"
-    Invoke-Native (Join-Path $RubyDir 'bin\ridk.cmd') install 3
+if (-not $Offline) {
+    if (-not (Test-Path (Join-Path $MsysDir 'ucrt64\bin\gcc.exe'))) {
+        Write-Host "    ridk install 3 (toolchain MinGW UCRT64)"
+        Invoke-Native (Join-Path $RubyDir 'bin\ridk.cmd') install 3
+    }
+    # Libreria client per la gem mysql2
+    Invoke-Native (Join-Path $RubyDir 'bin\ridk.cmd') exec pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-libmariadbclient
 }
 
-$env:PATH       = "$RubyDir\bin;$PgDir\bin;$env:PATH"
+$env:PATH       = "$RubyDir\bin;$DbDir\bin;$env:PATH"
 $env:RAILS_ENV  = 'production'
 $env:REDMINE_LANG = $Language
 
@@ -250,15 +312,18 @@ if (-not (Test-Path (Join-Path $RedmineDir 'config\application.rb'))) {
     Rename-Item (Join-Path $InstallDir "redmine-$RedmineVersion") $RedmineDir
 }
 
+# transaction_isolation READ-COMMITTED: richiesto da Redmine con MySQL/MariaDB
 Write-TextFile (Join-Path $RedmineDir 'config\database.yml') @"
 production:
-  adapter: postgresql
+  adapter: mysql2
   database: redmine
-  host: localhost
-  port: $PgPort
+  host: 127.0.0.1
+  port: $DbPort
   username: redmine
-  password: "$($creds['PG_REDMINE_PASSWORD'])"
-  encoding: utf8
+  password: "$($creds['DB_REDMINE_PASSWORD'])"
+  encoding: utf8mb4
+  variables:
+    transaction_isolation: "READ-COMMITTED"
 
 "@
 
@@ -278,6 +343,8 @@ try {
     } else {
         Write-Host "    bundle install"
         Invoke-Native $RubyExe $BundleRb install
+        Write-Host "    DLL native delle gem (per l'uso senza MSYS2)"
+        Copy-NativeGemDlls
     }
 
     if (-not (Test-Path 'config\initializers\secret_token.rb')) {
@@ -349,7 +416,7 @@ Invoke-Native $Wsw install --name $RedmineServiceName `
     --display-name $RedmineServiceName --description "Redmine $RedmineVersion (Puma su porta $HttpPort)" `
     --exe $RubyExe --working-dir $RedmineDir `
     --env RAILS_ENV=production --env "PATH=$RubyDir\bin;%PATH%" --env "BUNDLE_USER_HOME=$RedmineDir\tmp\bundle" `
-    --depends-on $PgServiceName --start-type delayed-auto `
+    --depends-on $DbServiceName --start-type delayed-auto `
     --account-name $ServiceUser --grant-dir $RedmineDir `
     --restart always --restart-delay 10 --restart-max-delay 120 --stop-timeout 20 `
     --log-dir $LogDir --log-max-size 10 --max-log-files 8 `

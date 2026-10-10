@@ -1,7 +1,7 @@
 # --- Build dell'installer (rigenerati da installer/Build-Installer.ps1) ---
 # Inno Setup portable, scaricato alla prima build
 installer/tools/
-# Archivi scaricati (PostgreSQL, Ruby, MSYS2, Redmine, wsw, Inno Setup)
+# Archivi scaricati (MariaDB, Ruby, MSYS2, Redmine, wsw, Inno Setup)
 installer/cache/
 # File da impacchettare e installer compilato
 installer/stage/

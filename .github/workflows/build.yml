@@ -18,7 +18,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      # PostgreSQL, Ruby, Redmine, MSYS2, wsw and Inno Setup archives. The key changes when the
+      # MariaDB, Ruby, Redmine, MSYS2, wsw and Inno Setup archives. The key changes when the
       # pinned versions in the scripts change; restore-keys still reuse whatever is unchanged.
       - name: Cache downloads
         uses: actions/cache@v6
@@ -32,6 +32,12 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: ./installer/Build-Installer.ps1
+
+      # The hosted runner ships MSYS2 in C:\msys64, where RubyInstaller would find the DLLs of the
+      # native gems: hide it, so the test proves the installer works on a machine without MSYS2
+      - name: Hide the runner MSYS2
+        shell: pwsh
+        run: if (Test-Path C:\msys64) { Rename-Item C:\msys64 msys64.hidden }
 
       # Silent install with custom path/ports/language, service checks, uninstall keeping the
       # data, reinstall on the same data, full uninstall

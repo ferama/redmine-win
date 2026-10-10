@@ -1,11 +1,9 @@
-; Installer offline di Redmine (Ruby + PostgreSQL + wsw precompilati) - Inno Setup 7
+; Installer offline di Redmine (Ruby + MariaDB + wsw precompilati) - Inno Setup 7
 ; Compilazione: Build-Installer.ps1 (prepara "stage\" e richiama ISCC)
 ;
 ; Installazione silenziosa:
 ;   Redmine-<versione>-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /DIR=D:\Redmine
-;       /HTTPPORT=8080 /PGPORT=5433 /REDMINELANG=en /TASKS=firewall /LOG=setup.log
-; Il runtime Visual C++ incluso viene installato solo se manca o e' piu' vecchio
-; (/FORCEVCREDIST lo esegue comunque, per i test)
+;       /HTTPPORT=8080 /DBPORT=3307 /REDMINELANG=en /TASKS=firewall /LOG=setup.log
 ; Disinstallazione silenziosa (i dati restano, salvo /REMOVEDATA):
 ;   unins000.exe /VERYSILENT /SUPPRESSMSGBOXES [/REMOVEDATA]
 
@@ -14,15 +12,6 @@
 #endif
 #ifndef StageDir
   #define StageDir "stage"
-#endif
-; Runtime Visual C++ x64 richiesto da PostgreSQL (vcruntime140.dll): versione passata da Build-Installer.ps1
-#ifndef VcRedist
-  #define VcRedist "cache\vc_redist.x64.exe"
-#endif
-#ifndef VcRedistVersion
-  #define VcRedistVersion "14.51.36247.0"
-  #define VcRedistMinor "51"
-  #define VcRedistBld "36247"
 #endif
 
 [Setup]
@@ -63,45 +52,41 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
 it.PortsCaption=Porte di rete
-it.PortsDescription=Su quali porte devono rispondere Redmine e PostgreSQL?
-it.PortsSubCaption=Redmine e' raggiungibile via HTTP sulla prima porta. PostgreSQL ascolta solo su localhost.
+it.PortsDescription=Su quali porte devono rispondere Redmine e MariaDB?
+it.PortsSubCaption=Redmine e' raggiungibile via HTTP sulla prima porta. MariaDB ascolta solo su localhost.
 it.HttpPortLabel=Porta HTTP di &Redmine:
-it.PgPortLabel=Porta di &PostgreSQL:
+it.DbPortLabel=Porta di &MariaDB:
 it.LangCaption=Lingua
 it.LangDescription=Lingua dei dati iniziali di Redmine
 it.LangSubCaption=Stati, trackers, ruoli e priorita' predefiniti vengono creati in questa lingua. Ogni utente puo' poi scegliere la lingua dell'interfaccia.
 it.FirewallTask=Apri la porta HTTP nel firewall di Windows (accesso da altri computer)
 it.ErrPath=Il percorso di installazione non deve contenere spazi o caratteri non ASCII ed essere lungo al massimo 60 caratteri.
 it.ErrPortValue=Le porte devono essere numeri tra 1 e 65535.
-it.ErrPortSame=La porta HTTP e quella di PostgreSQL devono essere diverse.
+it.ErrPortSame=La porta HTTP e quella di MariaDB devono essere diverse.
 it.ErrPortBusy=La porta %1 e' gia' in uso da un altro programma. Sceglierne un'altra.
-it.Configuring=Configurazione di PostgreSQL e Redmine in corso (qualche minuto)...
+it.Configuring=Configurazione di MariaDB e Redmine in corso (qualche minuto)...
 it.ConfigFailed=La configurazione di Redmine non e' riuscita (codice %1).%n%nDettagli nel log:%n%2%n%nDopo aver risolto il problema si puo' rilanciare l'installazione.
-it.VcRedistInstalling=Installazione del runtime Microsoft Visual C++ (richiesto da PostgreSQL)...
-it.VcRedistFailed=L'installazione del runtime Microsoft Visual C++ non e' riuscita (codice %1). Installare vc_redist.x64.exe da https://aka.ms/vc14/vc_redist.x64.exe e ripetere l'installazione.
-it.FinishedOk=Redmine e' installato e in esecuzione all'indirizzo:%n%1%n%nAccesso iniziale:%n    utente:  admin%n    password:  admin%nAl primo accesso Redmine chiede di cambiare la password.%n%nLe password generate per PostgreSQL sono nel file (leggibile solo dagli amministratori):%n%2
+it.FinishedOk=Redmine e' installato e in esecuzione all'indirizzo:%n%1%n%nAccesso iniziale:%n    utente:  admin%n    password:  admin%nAl primo accesso Redmine chiede di cambiare la password.%n%nLe password generate per MariaDB sono nel file (leggibile solo dagli amministratori):%n%2
 it.FinishedFailed=I file di Redmine sono stati installati, ma la configurazione non e' riuscita.%n%nDettagli nel log:%n%1
 it.OpenRedmine=Apri Redmine nel browser
 it.RemoveData=Eliminare anche database, allegati, credenziali e log?%n%nScegliendo No restano in %1 e verranno riutilizzati da una nuova installazione.
 it.DataKept=I dati di Redmine sono stati conservati in %1.
 en.PortsCaption=Network ports
-en.PortsDescription=Which ports should Redmine and PostgreSQL listen on?
-en.PortsSubCaption=Redmine is served over HTTP on the first port. PostgreSQL only listens on localhost.
+en.PortsDescription=Which ports should Redmine and MariaDB listen on?
+en.PortsSubCaption=Redmine is served over HTTP on the first port. MariaDB only listens on localhost.
 en.HttpPortLabel=&Redmine HTTP port:
-en.PgPortLabel=&PostgreSQL port:
+en.DbPortLabel=&MariaDB port:
 en.LangCaption=Language
 en.LangDescription=Language of the Redmine default data
 en.LangSubCaption=Default statuses, trackers, roles and priorities are created in this language. Every user can then pick the interface language.
 en.FirewallTask=Open the HTTP port in Windows Firewall (access from other computers)
 en.ErrPath=The installation path must not contain spaces or non-ASCII characters and must be at most 60 characters long.
 en.ErrPortValue=Ports must be numbers between 1 and 65535.
-en.ErrPortSame=The HTTP and PostgreSQL ports must be different.
+en.ErrPortSame=The HTTP and MariaDB ports must be different.
 en.ErrPortBusy=Port %1 is already used by another program. Please choose another one.
-en.Configuring=Configuring PostgreSQL and Redmine (this takes a few minutes)...
+en.Configuring=Configuring MariaDB and Redmine (this takes a few minutes)...
 en.ConfigFailed=The Redmine configuration failed (code %1).%n%nDetails in the log:%n%2%n%nOnce the problem is fixed the setup can be run again.
-en.VcRedistInstalling=Installing the Microsoft Visual C++ runtime (required by PostgreSQL)...
-en.VcRedistFailed=The Microsoft Visual C++ runtime installation failed (code %1). Install vc_redist.x64.exe from https://aka.ms/vc14/vc_redist.x64.exe and run the setup again.
-en.FinishedOk=Redmine is installed and running at:%n%1%n%nInitial login:%n    user:  admin%n    password:  admin%nRedmine asks to change the password at the first login.%n%nThe generated PostgreSQL passwords are in this file (readable by administrators only):%n%2
+en.FinishedOk=Redmine is installed and running at:%n%1%n%nInitial login:%n    user:  admin%n    password:  admin%nRedmine asks to change the password at the first login.%n%nThe generated MariaDB passwords are in this file (readable by administrators only):%n%2
 en.FinishedFailed=The Redmine files have been installed, but the configuration failed.%n%nDetails in the log:%n%1
 en.OpenRedmine=Open Redmine in the browser
 en.RemoveData=Also delete the database, attachments, credentials and logs?%n%nIf you choose No they stay in %1 and are reused by a new installation.
@@ -111,7 +96,6 @@ en.DataKept=The Redmine data has been kept in %1.
 Name: "firewall"; Description: "{cm:FirewallTask}"; Flags: unchecked
 
 [Files]
-Source: "{#VcRedist}"; DestName: "vc_redist.x64.exe"; Flags: dontcopy
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [INI]
@@ -133,7 +117,7 @@ Type: files; Name: "{app}\Redmine.url"
 [Code]
 const
   RedmineService = 'Redmine';
-  PgService      = 'RedminePostgreSQL';
+  DbService      = 'RedmineMariaDB';
 
 var
   PortsPage: TInputQueryWizardPage;
@@ -171,46 +155,6 @@ begin
       Result := True;
 end;
 
-{ --- Runtime Visual C++ (vcruntime140.dll, usata da postgres.exe e libpq.dll) --- }
-
-const
-  VcRuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
-
-{ True se e' installato un runtime x64 almeno pari a quello incluso nell'installer }
-function VcRuntimeCurrent: Boolean;
-var
-  Installed, Minor, Bld: Cardinal;
-begin
-  Result := RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Installed', Installed) and (Installed = 1) and
-            RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Minor', Minor) and
-            RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Bld', Bld) and
-            ((Minor > {#VcRedistMinor}) or ((Minor = {#VcRedistMinor}) and (Bld >= {#VcRedistBld}))) and
-            FileExists(ExpandConstant('{sys}\vcruntime140.dll'));
-end;
-
-{ Stringa vuota se il runtime e' a posto, altrimenti il messaggio d'errore }
-function EnsureVcRuntime: String;
-var
-  Code: Integer;
-begin
-  Result := '';
-  if VcRuntimeCurrent and not HasParam('/FORCEVCREDIST') then begin
-    Log('Runtime Visual C++ x64 gia'' presente e aggiornato (incluso: {#VcRedistVersion})');
-    Exit;
-  end;
-  Log('Installazione del runtime Visual C++ x64 {#VcRedistVersion}');
-  WizardForm.PreparingLabel.Caption := CustomMessage('VcRedistInstalling');
-  WizardForm.PreparingLabel.Visible := True;
-  ExtractTemporaryFile('vc_redist.x64.exe');
-  if not Exec(ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart', '',
-              SW_HIDE, ewWaitUntilTerminated, Code) then
-    Code := -1;
-  Log('vc_redist.x64.exe terminato con codice ' + IntToStr(Code));
-  { 1638: e' gia' installata una versione piu' recente; 3010: riavvio consigliato, il runtime e' gia' utilizzabile }
-  if (Code <> 0) and (Code <> 1638) and (Code <> 3010) then
-    Result := FmtMessage(CustomMessage('VcRedistFailed'), [IntToStr(Code)]);
-end;
-
 { --- Valori scelti (pagine, riga di comando o installazione precedente) --- }
 
 function GetHttpPort(Param: String): String;
@@ -218,7 +162,7 @@ begin
   Result := Trim(PortsPage.Values[0]);
 end;
 
-function GetPgPort: String;
+function GetDbPort: String;
 begin
   Result := Trim(PortsPage.Values[1]);
 end;
@@ -254,21 +198,21 @@ end;
 { Stringa vuota se le porte vanno bene, altrimenti il messaggio d'errore }
 function CheckPorts: String;
 var
-  Http, Pg: Integer;
+  Http, Db: Integer;
 begin
   Result := '';
   Http := StrToIntDef(GetHttpPort(''), 0);
-  Pg := StrToIntDef(GetPgPort, 0);
-  if (Http < 1) or (Http > 65535) or (Pg < 1) or (Pg > 65535) then
+  Db := StrToIntDef(GetDbPort, 0);
+  if (Http < 1) or (Http > 65535) or (Db < 1) or (Db > 65535) then
     Result := CustomMessage('ErrPortValue')
-  else if Http = Pg then
+  else if Http = Db then
     Result := CustomMessage('ErrPortSame')
   { In un aggiornamento le porte sono occupate dai servizi di Redmine stessi }
   else if not ServiceInstalled(RedmineService) then begin
     if PortInUse(Http) then
       Result := FmtMessage(CustomMessage('ErrPortBusy'), [IntToStr(Http)])
-    else if PortInUse(Pg) then
-      Result := FmtMessage(CustomMessage('ErrPortBusy'), [IntToStr(Pg)]);
+    else if PortInUse(Db) then
+      Result := FmtMessage(CustomMessage('ErrPortBusy'), [IntToStr(Db)]);
   end;
 end;
 
@@ -292,9 +236,9 @@ begin
   PortsPage := CreateInputQueryPage(wpSelectDir, CustomMessage('PortsCaption'),
     CustomMessage('PortsDescription'), CustomMessage('PortsSubCaption'));
   PortsPage.Add(CustomMessage('HttpPortLabel'), False);
-  PortsPage.Add(CustomMessage('PgPortLabel'), False);
+  PortsPage.Add(CustomMessage('DbPortLabel'), False);
   PortsPage.Values[0] := ExpandConstant('{param:HTTPPORT|' + GetPreviousData('HttpPort', '3000') + '}');
-  PortsPage.Values[1] := ExpandConstant('{param:PGPORT|' + GetPreviousData('PgPort', '5432') + '}');
+  PortsPage.Values[1] := ExpandConstant('{param:DBPORT|' + GetPreviousData('DbPort', '3306') + '}');
 
   LangPage := CreateInputOptionPage(PortsPage.ID, CustomMessage('LangCaption'),
     CustomMessage('LangDescription'), CustomMessage('LangSubCaption'), True, True);
@@ -323,7 +267,7 @@ end;
 procedure RegisterPreviousData(PreviousDataKey: Integer);
 begin
   SetPreviousData(PreviousDataKey, 'HttpPort', GetHttpPort(''));
-  SetPreviousData(PreviousDataKey, 'PgPort', GetPgPort);
+  SetPreviousData(PreviousDataKey, 'DbPort', GetDbPort);
   SetPreviousData(PreviousDataKey, 'RedmineLang', GetRedmineLang);
 end;
 
@@ -356,13 +300,9 @@ begin
   Result := CheckPorts;
   if Result <> '' then
     Exit;
-  { Prima di copiare qualsiasi file: se il runtime non si installa, il setup si ferma pulito }
-  Result := EnsureVcRuntime;
-  if Result <> '' then
-    Exit;
   { Aggiornamento/reinstallazione: i servizi tengono aperti i file da sostituire }
-  if ServiceInstalled(RedmineService) or ServiceInstalled(PgService) then
-    RunPowerShell('Stop-Service ' + RedmineService + ',' + PgService + ' -Force -ErrorAction SilentlyContinue');
+  if ServiceInstalled(RedmineService) or ServiceInstalled(DbService) then
+    RunPowerShell('Stop-Service ' + RedmineService + ',' + DbService + ' -Force -ErrorAction SilentlyContinue');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -375,7 +315,7 @@ begin
   LogFile := ExpandConstant('{app}\logs\setup.log');
   Params := '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{app}\setup\Install-Redmine.ps1')) +
             ' -Offline -InstallDir ' + AddQuotes(ExpandConstant('{app}')) +
-            ' -HttpPort ' + GetHttpPort('') + ' -PgPort ' + GetPgPort +
+            ' -HttpPort ' + GetHttpPort('') + ' -DbPort ' + GetDbPort +
             ' -Language ' + GetRedmineLang + ' -LogFile ' + AddQuotes(LogFile);
   if WizardIsTaskSelected('firewall') then
     Params := Params + ' -OpenFirewall';
@@ -397,7 +337,7 @@ begin
       mbCriticalError, MB_OK, IDOK);
 end;
 
-{ Pagina finale: indirizzo, credenziali iniziali e posizione delle password di PostgreSQL }
+{ Pagina finale: indirizzo, credenziali iniziali e posizione delle password di MariaDB }
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID <> wpFinished then

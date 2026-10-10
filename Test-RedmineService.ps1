@@ -56,7 +56,9 @@ $cim = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
 Check 'servizio gestito da wsw' ($cim.PathName -match [regex]::Escape($Wsw)) $cim.PathName
 Check 'account NetworkService' ($cim.StartName -eq 'NT AUTHORITY\NetworkService') $cim.StartName
 Check 'avvio automatico ritardato' (($reg.Start -eq 2) -and ($reg.DelayedAutostart -eq 1)) "Start=$($reg.Start) Delayed=$($reg.DelayedAutostart)"
-Check 'dipende da RedminePostgreSQL' (@($reg.DependOnService) -contains 'RedminePostgreSQL') "$($reg.DependOnService -join ',')"
+Check 'dipende da RedmineMariaDB' (@($reg.DependOnService) -contains 'RedmineMariaDB') "$($reg.DependOnService -join ',')"
+$dbSvc = Get-CimInstance Win32_Service -Filter "Name='RedmineMariaDB'"
+Check 'MariaDB: servizio attivo come NetworkService' (($dbSvc.State -eq 'Running') -and ($dbSvc.StartName -eq 'NT AUTHORITY\NetworkService')) "$($dbSvc.State), $($dbSvc.StartName)"
 Check 'nessun residuo WinSW' (-not (Test-Path (Join-Path $InstallDir "service\$ServiceName.xml"))) ''
 Write-Host ((& $Wsw status --name $ServiceName --verbose 2>&1) | Out-String)
 
